@@ -1,194 +1,153 @@
-/* USER CODE BEGIN Header */
-/**
-  ******************************************************************************
-  * File Name          : freertos.c
-  * Description        : Code for freertos applications
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
-/* USER CODE END Header */
-
 /* Includes ------------------------------------------------------------------*/
+#include <stdio.h>
+#include <string.h>
+
 #include "FreeRTOS.h"
 #include "task.h"
 #include "main.h"
-//#include "cmsis_os.h"
+#include "sht31.h"
+#include "queue.h"
+#include "semphr.h"
 
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
+extern UART_HandleTypeDef huart2;
 
-/* USER CODE END Includes */
+void timerWakeTask(void *argument);
+void sensorTask(void *argument);
+void extiTask(void *argument);
+void uartTask(void *argument);
 
-/* Private typedef -----------------------------------------------------------*/
-/* USER CODE BEGIN PTD */
+/* Queue for UART messages */
+QueueHandle_t uartQueue;
 
-/* USER CODE END PTD */
+/* Binary semaphore for EXTI button */
+SemaphoreHandle_t extiSemaphore;
 
-/* Private define ------------------------------------------------------------*/
-/* USER CODE BEGIN PD */
+/* Task notifications for TIM3 wakeup */
+TaskHandle_t timerTaskHandle;
 
-/* USER CODE END PD */
-
-/* Private macro -------------------------------------------------------------*/
-/* USER CODE BEGIN PM */
-
-/* USER CODE END PM */
-
-/* Private variables ---------------------------------------------------------*/
-/* USER CODE BEGIN Variables */
-TaskHandle_t Task1Handle;
-TaskHandle_t Task2Handle;
-/* USER CODE END Variables */
-/* Definitions for defaultTask */
-/* osThreadId_t defaultTaskHandle;
-const osThreadAttr_t defaultTask_attributes = {
-  .name = "defaultTask",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-}; */
-
-/* Private function prototypes -----------------------------------------------*/
-/* USER CODE BEGIN FunctionPrototypes */
-void TaskPB13(void *argument);
-void TaskPB14(void *argument);
-void Delay(uint32_t gap);
-extern void Error_Handler(void);
-/* USER CODE END FunctionPrototypes */
-
-// void StartDefaultTask(void *argument);
+/* Task handles */
+TaskHandle_t sensorTaskHandle;
+TaskHandle_t extiTaskHandle;
+TaskHandle_t uartTaskHandle;
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
 /* Hook prototypes */
-void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName);
+void vApplicationIdleHook(void);
 
-/* USER CODE BEGIN 4 */
-void vApplicationStackOverflowHook(xTaskHandle xTask, signed char *pcTaskName)
-{
-   /* Run time stack overflow checking is performed if
-   configCHECK_FOR_STACK_OVERFLOW is defined to 1 or 2. This hook function is
-   called if a stack overflow is detected. */
+/* USER CODE BEGIN 2 */
+void vApplicationIdleHook(void) {
+	/* vApplicationIdleHook() will only be called if configUSE_IDLE_HOOK is set
+	 to 1 in FreeRTOSConfig.h. It will be called on each iteration of the idle
+	 task. It is essential that code added to this hook function never attempts
+	 to block in any way (for example, call xQueueReceive() with a block time
+	 specified, or call vTaskDelay()). If the application makes use of the
+	 vTaskDelete() API function (as this demo application does) then it is also
+	 important that vApplicationIdleHook() is permitted to return to its calling
+	 function, because it is the responsibility of the idle task to clean up
+	 memory allocated by the kernel to any task that has since been deleted. */
+
+	/* Turn LED ON (active mode indicator) */
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 }
-/* USER CODE END 4 */
+/* USER CODE END 2 */
 
-/**
-  * @brief  FreeRTOS initialization
-  * @param  None
-  * @retval None
-  */
 void MX_FREERTOS_Init(void) {
-  /* USER CODE BEGIN Init */
 
-  /* USER CODE END Init */
+	/* UART queue: store up to 10 messages, each 64 bytes */
+	uartQueue = xQueueCreate(10, sizeof(char*));
 
-  /* USER CODE BEGIN RTOS_MUTEX */
-  /* add mutexes, ... */
-  /* USER CODE END RTOS_MUTEX */
+	/* EXTI semaphore */
+	extiSemaphore = xSemaphoreCreateBinary();
 
-  /* USER CODE BEGIN RTOS_SEMAPHORES */
-  /* add semaphores, ... */
-  /* USER CODE END RTOS_SEMAPHORES */
+	/* Timer wakeup task (High priority) */
+	xTaskCreate(timerWakeTask, "timer", 256, NULL, 5, &timerTaskHandle);
 
-  /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
-  /* USER CODE END RTOS_TIMERS */
+	/* Sensor task (Medium-2 priority) */
+	xTaskCreate(sensorTask, "sensor", 256, NULL, 4, &sensorTaskHandle);
 
-  /* USER CODE BEGIN RTOS_QUEUES */
-  /* add queues, ... */
-  /* USER CODE END RTOS_QUEUES */
+	/* EXTI task (Medium-1 priority) */
+	xTaskCreate(extiTask, "exti", 256, NULL, 3, &extiTaskHandle);
 
-  /* Create the thread(s) */
-  /* creation of defaultTask */
- // defaultTaskHandle = osThreadNew(StartDefaultTask, NULL, &defaultTask_attributes);
-
-  /* USER CODE BEGIN RTOS_THREADS */
-      // Create Task for PB13
-	BaseType_t status;
-
-	status = xTaskCreate(TaskPB13,
-                  "PB13Task",
-                  128,        // stack size in words
-                  NULL,
-                  1,
-                  &Task1Handle);
-
-	if (status != pdPASS) Error_Handler();
-
-      // Create Task for PB14
-      status = xTaskCreate(TaskPB14,
-                  "PB14Task",
-                  128,
-                  NULL,
-                  3,
-                  &Task2Handle);
-
-      if (status != pdPASS) Error_Handler();
-  /* USER CODE END RTOS_THREADS */
-
-  /* USER CODE BEGIN RTOS_EVENTS */
-  /* add events, ... */
-  /* USER CODE END RTOS_EVENTS */
-
+	/* UART printing task (Medium priority) */
+	xTaskCreate(uartTask, "uart", 256, NULL, 2, &uartTaskHandle);
 }
 
-/* USER CODE BEGIN Header_StartDefaultTask */
-/**
-  * @brief  Function implementing the defaultTask thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_StartDefaultTask */
-/*void StartDefaultTask(void *argument)
-{
-  /* USER CODE BEGIN StartDefaultTask */
-  /* Infinite loop */
- /* for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END StartDefaultTask */
-// }
+void timerWakeTask(void *argument) {
+	for (;;) {
 
-/* Private application code --------------------------------------------------*/
-/* USER CODE BEGIN Application */
-void TaskPB13(void *argument)
-  {
-     for (;;)
-      {
-          // toggle PB13 high
-          HAL_GPIO_TogglePin(GPIOB, task_1_Pin);
-          // 5 ms delay
-          vTaskDelay(pdMS_TO_TICKS(5));
-      }
-  }
+		/* Wait for TIM3 interrupt notification */
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-  void TaskPB14(void *argument)
-  {
-     for (;;)
-      {
-          /* Block until notified by EXTI ISR */
-                  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
 
-                  HAL_GPIO_WritePin(GPIOB, task_2_Pin, GPIO_PIN_SET);
-                  Delay(100000);
+		/* Turn LED OFF (active mode indicator) */
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
 
-                  HAL_GPIO_WritePin(GPIOB, task_2_Pin, GPIO_PIN_RESET);
-                  
-      }
-  }
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
 
-  void Delay(uint32_t gap) {
-      volatile uint32_t i;
-      for(i = 0; i < gap; i++);
-  }
-/* USER CODE END Application */
+		/* Wake sensor task */
+		xTaskNotifyGive(sensorTaskHandle);
+	}
+}
 
+void sensorTask(void *argument) {
+	static char msg[64];
+	char *pMsg = msg;
+
+	for (;;) {
+		/* Wait for task notification by TIM3 */
+		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_SET);
+
+		int temp, hum;
+
+		/* Measure temperature and humidity */
+		if (sht31_read(&temp, &hum) == HAL_OK) {
+			sprintf(msg, "T=%d H=%d\r\n", temp, hum);
+		} else {
+			sprintf(msg, "SHT31 error\r\n");
+		}
+
+		xQueueSend(uartQueue, &pMsg, 0);
+
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_7, GPIO_PIN_RESET);
+
+	}
+}
+
+void extiTask(void *argument) {
+	static char msg[] = "Button pressed!\r\n"; // static - lifetime through out the program
+	char *pMsg = msg;
+
+	for (;;) {
+		/* Wait for EXTI semaphore */
+		xSemaphoreTake(extiSemaphore, portMAX_DELAY);
+
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_SET);
+
+		xQueueSend(uartQueue, &pMsg, 0);        // send pointer
+
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_8, GPIO_PIN_RESET);
+	}
+}
+
+void uartTask(void *argument) {
+	char *pMsg;
+
+	for (;;) {
+		/* Block until a message arrives */
+		if (xQueueReceive(uartQueue, &pMsg, portMAX_DELAY) == pdTRUE) {
+
+			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_SET);
+
+			/* Prints the Queue */
+			HAL_UART_Transmit(&huart2, (uint8_t*) pMsg, strlen(pMsg),
+			HAL_MAX_DELAY);
+
+			HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
+
+		}
+	}
+}

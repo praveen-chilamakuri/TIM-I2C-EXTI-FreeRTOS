@@ -1,33 +1,48 @@
-This repo is for documenting the FreeRTOS + Logic Analyser learning using STM32F411RE Nucleo.
+# EXTI\_I2C\_FreeRTOS 
 
 
 
-LINKEDIN: https://www.linkedin.com/in/praveen-chilamakuri/
+### Documentation is in progress!
 
 
 
-1/9/2026
+void MX\_FREERTOS\_Init(void) {
 
 
 
-FreeRTOS preemptive scheduling:
+&#x09;/\* UART queue: store up to 10 messages, each 64 bytes \*/
 
-
-Task 1 (Low Priority): Actively toggles a GPIO pin, every 5 ms. 
-
-
-
-Task 2 (High Priority): Another GPIO pin, stays blocked until a user button press triggers an external interrupt (EXTI) and sends a task notification.
+&#x09;uartQueue = xQueueCreate(10, sizeof(char\*));
 
 
 
-When the button is pressed, the FreeRTOS scheduler instantly pauses Task 1 mid-execution. Because Task 1 is frozen in time, its GPIO pin stays stuck HIGH/LOW.
+&#x09;/\* EXTI semaphore \*/
+
+&#x09;extiSemaphore = xSemaphoreCreateBinary();
 
 
 
-Task 2 takes complete control of the CPU to execute a 100,000 iteration blocking loop. At a 16 MHz clock and with debug optimisation (-O0) generating multiple clock cycles per assembly instruction, this loop takes \~70 ms to complete.
+&#x09;/\* Timer wakeup task (High priority) \*/
+
+&#x09;xTaskCreate(timerWakeTask, "timer", 256, NULL, 5, \&timerTaskHandle);
 
 
 
-The exact millisecond Task 2 finishes, Task 1 resumes right where it left off.
+&#x09;/\* Sensor task (Medium-2 priority) \*/
+
+&#x09;xTaskCreate(sensorTask, "sensor", 256, NULL, 4, \&sensorTaskHandle);
+
+
+
+&#x09;/\* EXTI task (Medium-1 priority) \*/
+
+&#x09;xTaskCreate(extiTask, "exti", 256, NULL, 3, \&extiTaskHandle);
+
+
+
+&#x09;/\* UART printing task (Medium priority) \*/
+
+&#x09;xTaskCreate(uartTask, "uart", 256, NULL, 2, \&uartTaskHandle);
+
+}
 
