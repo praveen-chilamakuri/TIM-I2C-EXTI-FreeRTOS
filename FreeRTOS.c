@@ -48,9 +48,8 @@ void vApplicationIdleHook(void) {
 	 memory allocated by the kernel to any task that has since been deleted. */
 
 	/* Turn LED ON (active mode indicator) */
-	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
+		//HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_SET);
 }
-/* USER CODE END 2 */
 
 void MX_FREERTOS_Init(void) {
 
@@ -71,7 +70,11 @@ void MX_FREERTOS_Init(void) {
 
 	/* UART printing task (Medium priority) */
 	xTaskCreate(uartTask, "uart", 256, NULL, 2, &uartTaskHandle);
+
 }
+
+/* Private application code --------------------------------------------------*/
+/* USER CODE BEGIN Application */
 
 void timerWakeTask(void *argument) {
 	for (;;) {
@@ -80,11 +83,12 @@ void timerWakeTask(void *argument) {
 		ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
 		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
 
 		/* Turn LED OFF (active mode indicator) */
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
+		//HAL_GPIO_WritePin(GPIOA, GPIO_PIN_5, GPIO_PIN_RESET);
 
-		HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
+	//	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, GPIO_PIN_RESET);
 
 		/* Wake sensor task */
 		xTaskNotifyGive(sensorTaskHandle);
@@ -151,3 +155,26 @@ void uartTask(void *argument) {
 		}
 	}
 }
+
+void PreSleepProcessing(uint32_t expectedIdleTime) {
+	// Mark sleep entry
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_SET);
+
+	HAL_SuspendTick();
+
+	// Enter sleep
+	__WFI();
+
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_RESET);
+}
+
+void PostSleepProcessing(uint32_t expectedIdleTime) {
+	// Mark wakeup
+	HAL_ResumeTick();
+
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_SET);
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_10, GPIO_PIN_RESET);
+}
+
+/* USER CODE END Application */
+

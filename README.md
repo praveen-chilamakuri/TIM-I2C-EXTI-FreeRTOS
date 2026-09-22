@@ -1,4 +1,4 @@
-# EXTI\_I2C\_FreeRTOS 
+# EXTI\_I2C\_FreeRTOS (Tickless Idle)
 
 
 
